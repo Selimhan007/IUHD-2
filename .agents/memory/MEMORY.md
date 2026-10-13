@@ -1,0 +1,1 @@
+- [Student Hub auth routing](student-hub-auth.md) — preserve Replit preview origins and specific API route precedence for the imported Better Auth app.

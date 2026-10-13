@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Student Hub TM"
+description = "An imported student services platform for universities in Turkmenistan, covering schedules, courses, assignments, grades, attendance, materials, announcements, and role-based student, teacher, and administrator experiences."
+version = "1.0.0"
+id = "artifacts/student-hub-tm"
+router = "path"
+
+[[services]]
+name = "web"
+paths = ["/", "/api/auth", "/api/profile", "/api/assistant"]
+localPort = 24510
+
+[services.development]
+run = "pnpm --filter @workspace/student-hub-tm run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/student-hub-tm", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/student-hub-tm/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24510"
+BASE_PATH = "/"
