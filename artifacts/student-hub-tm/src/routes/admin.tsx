@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   Archive,
   Bell,
@@ -55,6 +55,14 @@ export const Route = createFileRoute("/admin")({
 type TabId = "students" | "teachers";
 type AdminPanel = "overview" | "content" | "control";
 type ContentKind = "announcement" | "event";
+type AssignableRole = "student" | "teacher" | "admin";
+type ManagedAccount = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  groupName: string | null;
+};
 
 function AdminPage() {
   return (
@@ -311,17 +319,99 @@ function AdminOperations() {
   const [fileLimit, setFileLimit] = useState("25");
   const [theme, setTheme] = useState("system");
   const [integrations, setIntegrations] = useState({ calendar: false, email: true, push: true });
-  const users = [
-    { name: "M. Atayev", role: "Student", group: "1B", status: "Active" },
-    { name: "G. Nurygdyyev", role: "Teacher", group: "Software", status: "Active" },
-    { name: "S. Ovezova", role: "Student", group: "1B", status: "Blocked" },
-  ];
+  const [users, setUsers] = useState<ManagedAccount[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [usersError, setUsersError] = useState("");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<AssignableRole>("student");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [createSuccess, setCreateSuccess] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    const loadUsers = async () => {
+      try {
+        const response = await fetch("/api/profile?view=admin-users", {
+          credentials: "include",
+        });
+        const payload = (await response.json()) as {
+          users?: ManagedAccount[];
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Unable to load user profiles.");
+        }
+        if (active) setUsers(payload.users ?? []);
+      } catch (error) {
+        if (active) {
+          setUsersError(error instanceof Error ? error.message : "Unable to load user profiles.");
+        }
+      } finally {
+        if (active) setUsersLoading(false);
+      }
+    };
+
+    void loadUsers();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const createProfile = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setCreating(true);
+    setCreateError("");
+    setCreateSuccess("");
+
+    try {
+      const response = await fetch("/api/profile", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ name, email, password, role }),
+      });
+      const payload = (await response.json()) as {
+        user?: ManagedAccount;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.user) {
+        throw new Error(payload.error ?? "Unable to create the account.");
+      }
+
+      const createdUser = payload.user;
+      setUsers((current) => [
+        createdUser,
+        ...current.filter((user) => user.id !== createdUser.id),
+      ]);
+      setName("");
+      setEmail("");
+      setPassword("");
+      setRole("student");
+      setCreateSuccess("Profile created. Share the login details with the user.");
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : "Unable to create the account.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const events = [
     "G. Nurygdyyev uploaded lecture-04.pdf",
     "Admin changed S. Ovezova role to Student",
     "M. Atayev submitted Lab report: loops",
     "Archive request for Group 1B was reviewed",
   ];
+  const filteredUsers = users.filter((user) =>
+    `${user.name} ${user.email} ${user.role} ${user.groupName ?? ""}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
+  );
 
   return (
     <section className="overflow-hidden rounded-3xl border border-border bg-card shadow-card">
@@ -372,14 +462,91 @@ function AdminOperations() {
 
       {section === "users" ? (
         <div className="divide-y divide-border">
-          <div className="grid gap-3 p-4 sm:grid-cols-3 sm:p-5">
-            {["1,248 users", "42 teachers", "18 blocked"].map((label, index) => (
-              <div key={label} className="rounded-2xl bg-muted/60 p-3">
-                <p className="text-lg font-bold">{label.split(" ")[0]}</p>
-                <p className="text-xs text-muted-foreground">
-                  {label.slice(label.indexOf(" ") + 1)}
-                  {index === 2 ? " · review needed" : ""}
+          <div className="p-4 sm:p-5">
+            <form
+              onSubmit={createProfile}
+              className="rounded-2xl border border-border bg-background p-4 sm:p-5"
+            >
+              <div>
+                <h3 className="font-bold">Add a profile</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Create a login and assign the account role. Passwords must be at least 8 characters.
                 </p>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <label className="text-sm font-medium">
+                  Full name
+                  <input
+                    required
+                    minLength={2}
+                    maxLength={100}
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-input bg-card px-3 py-2.5 font-normal"
+                  />
+                </label>
+                <label className="text-sm font-medium">
+                  Email
+                  <input
+                    required
+                    type="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-input bg-card px-3 py-2.5 font-normal"
+                  />
+                </label>
+                <label className="text-sm font-medium">
+                  Temporary password
+                  <input
+                    required
+                    type="password"
+                    minLength={8}
+                    maxLength={128}
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-input bg-card px-3 py-2.5 font-normal"
+                  />
+                </label>
+                <label className="text-sm font-medium">
+                  Role
+                  <select
+                    required
+                    value={role}
+                    onChange={(event) => setRole(event.target.value as AssignableRole)}
+                    className="mt-1.5 w-full rounded-xl border border-input bg-card px-3 py-2.5 font-normal"
+                  >
+                    <option value="student">Student</option>
+                    <option value="teacher">Teacher</option>
+                    <option value="admin">Administrator</option>
+                  </select>
+                </label>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={creating}
+                  className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {creating ? "Creating profile…" : "Create profile"}
+                </button>
+                <span aria-live="polite" className="text-xs">
+                  {createError ? <span className="text-destructive">{createError}</span> : null}
+                  {createSuccess ? <span className="text-success">{createSuccess}</span> : null}
+                </span>
+              </div>
+            </form>
+          </div>
+          <div className="grid gap-3 p-4 sm:grid-cols-3 sm:p-5">
+            {[
+              { label: "Accounts", value: users.length },
+              { label: "Teachers", value: users.filter((user) => user.role === "teacher").length },
+              { label: "Administrators", value: users.filter((user) => user.role === "admin" || user.role === "superadmin").length },
+            ].map((item) => (
+              <div key={item.label} className="rounded-2xl bg-muted/60 p-3">
+                <p className="text-lg font-bold">{item.value}</p>
+                <p className="text-xs text-muted-foreground">{item.label}</p>
               </div>
             ))}
           </div>
@@ -390,44 +557,40 @@ function AdminOperations() {
                   <th className="px-5 py-3">User</th>
                   <th className="px-5 py-3">Role</th>
                   <th className="px-5 py-3">Group</th>
-                  <th className="px-5 py-3">Status</th>
-                  <th className="px-5 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {users
-                  .filter((user) =>
-                    `${user.name} ${user.role} ${user.group}`
-                      .toLowerCase()
-                      .includes(search.toLowerCase()),
-                  )
-                  .map((user) => (
-                    <tr key={user.name}>
-                      <td className="px-5 py-3 font-medium">{user.name}</td>
-                      <td className="px-5 py-3 text-muted-foreground">{user.role}</td>
-                      <td className="px-5 py-3 text-muted-foreground">{user.group}</td>
-                      <td className="px-5 py-3">
-                        <span
-                          className={cn(
-                            "rounded-full px-2 py-1 text-xs font-semibold",
-                            user.status === "Blocked"
-                              ? "bg-destructive/10 text-destructive"
-                              : "bg-success/10 text-success",
-                          )}
-                        >
-                          {user.status}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3">
-                        <button
-                          onClick={() => setSaved(true)}
-                          className="rounded-lg bg-muted px-3 py-1.5 text-xs font-semibold hover:bg-primary-soft"
-                        >
-                          Change role
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                {usersLoading ? (
+                  <tr>
+                    <td colSpan={3} className="px-5 py-8 text-center text-sm text-muted-foreground">
+                      Loading profiles…
+                    </td>
+                  </tr>
+                ) : usersError ? (
+                  <tr>
+                    <td colSpan={3} className="px-5 py-8 text-center text-sm text-destructive">
+                      {usersError}
+                    </td>
+                  </tr>
+                ) : filteredUsers.map((user) => (
+                      <tr key={user.id}>
+                        <td className="px-5 py-3">
+                          <p className="font-medium">{user.name}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">{user.email}</p>
+                        </td>
+                        <td className="px-5 py-3 capitalize text-muted-foreground">
+                          {user.role === "superadmin" ? "Superadmin" : user.role}
+                        </td>
+                        <td className="px-5 py-3 text-muted-foreground">{user.groupName || "—"}</td>
+                      </tr>
+                    ))}
+                {!usersLoading && !usersError && filteredUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="px-5 py-8 text-center text-sm text-muted-foreground">
+                      {users.length === 0 ? "No profiles found." : "No matching profiles."}
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
