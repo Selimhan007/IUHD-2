@@ -19,6 +19,7 @@ import {
 import {
   Clock,
   MapPin,
+  Download,
   FileText,
   Link2,
   Video,
@@ -220,7 +221,7 @@ const kindIcon = {
   video: Video,
 } as const;
 
-export function MaterialCard({ m }: { m: Material }) {
+export function MaterialCard({ m }: { m: Material & { downloadUrl?: string } }) {
   const { t } = useI18n();
   const Icon = kindIcon[m.kind];
   return (
@@ -234,7 +235,14 @@ export function MaterialCard({ m }: { m: Material }) {
           {m.kind.toUpperCase()} · {m.size}
         </p>
       </div>
-      <span className="text-sm font-semibold text-primary">{t("materials.download")}</span>
+      {m.downloadUrl ? (
+        <a href={m.downloadUrl} download className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-primary hover:bg-primary-soft">
+          <Download className="size-4" />
+          {t("materials.download")}
+        </a>
+      ) : (
+        <span className="text-sm font-semibold text-muted-foreground">{t("materials.download")}</span>
+      )}
     </Card>
   );
 }
@@ -293,10 +301,12 @@ export function EventCard({
   e,
   registered,
   onRegister,
+  registering = false,
 }: {
   e: UniEvent;
   registered: boolean;
   onRegister: () => void;
+  registering?: boolean;
 }) {
   const { t } = useI18n();
   const d = new Date(e.date);
@@ -318,11 +328,11 @@ export function EventCard({
       <div className="mt-4 flex gap-2">
         <Button
           onClick={onRegister}
-          disabled={registered}
+          disabled={registered || registering}
           className="flex-1"
           variant={registered ? "secondary" : "default"}
         >
-          {registered ? t("events.registered") : t("events.register")}
+          {registered ? t("events.registered") : registering ? "…" : t("events.register")}
         </Button>
         <Button onClick={() => downloadIcs(e)} variant="outline">
           {t("events.addCalendar")}

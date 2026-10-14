@@ -1,9 +1,10 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Check, Clock, FileText, FileUp, Filter, MapPin, Search, Trash2, Users } from "lucide-react";
 import { Card, EmptyState, Pill, ProgressBar } from "@/components/app/ui-kit";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { group, students, type Assignment, type Course, type Lesson } from "@/lib/demo-data";
+import { deleteContent, getContent, postContent, type SavedMaterial } from "@/lib/content-client";
 
 const initials = (name: string) =>
   name
@@ -302,37 +303,47 @@ export function SubmissionsPanel({
   );
 }
 
-type LectureMaterial = {
-  id: string;
-  title: string;
-  fileName: string;
-  courseId: string;
-  groupId: string;
-  groupName: string;
-  uploadedAt: string;
-};
-
 const TEACHER_GROUPS = [group, { id: "g2", programId: "p1", name: "1C", year: 1 }, { id: "g3", programId: "p1", name: "2A", year: 2 }];
 
 export function LectureMaterialsPanel({ courses }: { courses: Course[] }) {
-  const [materials, setMaterials] = useState<LectureMaterial[]>([]);
+  const [materials, setMaterials] = useState<SavedMaterial[]>([]);
   const [courseId, setCourseId] = useState(courses[0]?.id ?? "");
   const [groupId, setGroupId] = useState(group.id);
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [published, setPublished] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filterGroup, setFilterGroup] = useState("all");
   const [sortBy, setSortBy] = useState<"newest" | "title">("newest");
+
+  useEffect(() => {
+    let active = true;
+    void getContent<{ items: SavedMaterial[] }>("teacher-materials")
+      .then((response) => {
+        if (active) setMaterials(response.items);
+      })
+      .catch((requestError) => {
+        if (active) setError(requestError instanceof Error ? requestError.message : "Unable to load lesson materials.");
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const visibleMaterials = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return materials
       .filter((material) => filterGroup === "all" || material.groupId === filterGroup)
       .filter((material) => !normalized || `${material.title} ${material.fileName}`.toLowerCase().includes(normalized))
-      .sort((a, b) => sortBy === "title" ? a.title.localeCompare(b.title) : b.id.localeCompare(a.id));
+      .sort((a, b) => sortBy === "title" ? a.title.localeCompare(b.title) : Date.parse(b.uploadedAt) - Date.parse(a.uploadedAt));
   }, [filterGroup, materials, query, sortBy]);
 
   const addMaterial = async (event: FormEvent<HTMLFormElement>) => {
@@ -354,24 +365,56 @@ export function LectureMaterialsPanel({ courses }: { courses: Course[] }) {
       return;
     }
     setIsPublishing(true);
-    await new Promise((resolve) => window.setTimeout(resolve, 250));
-    const selectedGroup = TEACHER_GROUPS.find((item) => item.id === groupId);
-    setMaterials((current) => [
-      {
-        id: `lecture-${Date.now()}`,
+    try {
+      const contentType = file.type || "application/octet-stream";
+      const upload = await postContent<{ uploadId: string; uploadURL: string }>({
+        action: "request-upload",
+        name: file.name,
+        size: file.size,
+        contentType,
+        courseId,
+      });
+      const uploadResponse = await fetch(upload.uploadURL, {
+        method: "PUT",
+        headers: { "Content-Type": contentType },
+        body: file,
+        credentials: "omit",
+      });
+      if (!uploadResponse.ok) throw new Error("The file upload failed. Please try again.");
+
+      const created = await postContent<{ item: SavedMaterial }>({
+        action: "create-material",
+        uploadId: upload.uploadId,
         title: title.trim(),
-        fileName: file.name,
         courseId,
         groupId,
-        groupName: selectedGroup?.name ?? group.name,
-        uploadedAt: new Date().toLocaleDateString(),
-      },
-      ...current,
-    ]);
-    setTitle("");
-    setFile(null);
-    setIsPublishing(false);
-    setPublished(`Lecture published for ${selectedGroup?.name ?? group.name}`);
+      });
+      const selectedGroup = TEACHER_GROUPS.find((item) => item.id === groupId);
+      setMaterials((current) => [created.item, ...current.filter((item) => item.id !== created.item.id)]);
+      setTitle("");
+      setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setPublished(`Lecture published for ${selectedGroup?.name ?? group.name}. Students in that group were notified.`);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to publish lecture.");
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
+  const removeMaterial = async (material: SavedMaterial) => {
+    if (!window.confirm(`Delete “${material.title}” for group ${material.groupName}?`)) return;
+    setDeletingId(material.id);
+    setError(null);
+    setPublished(null);
+    try {
+      await deleteContent<{ deleted: boolean }>(`materialId=${encodeURIComponent(material.id)}`);
+      setMaterials((current) => current.filter((item) => item.id !== material.id));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to delete material.");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   return (
@@ -383,17 +426,17 @@ export function LectureMaterialsPanel({ courses }: { courses: Course[] }) {
           </span>
           <div>
             <h3 className="font-semibold">Upload lecture</h3>
-            <p className="text-xs text-muted-foreground">Publish a file directly to a selected group.</p>
+            <p className="text-xs text-muted-foreground">Upload a course file and notify students in the selected group.</p>
           </div>
         </div>
         <form onSubmit={addMaterial} className="grid gap-3">
           <label className="grid gap-1.5 text-sm font-medium">
             Lecture title
-            <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Week 4 — Motion" className="rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-ring" required />
+            <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Week 4 — Motion" minLength={2} maxLength={160} className="rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-ring" required />
           </label>
           <label className="grid gap-1.5 text-sm font-medium">
             Course
-            <select value={courseId} onChange={(event) => setCourseId(event.target.value)} className="rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-ring">
+            <select value={courseId} onChange={(event) => setCourseId(event.target.value)} className="rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-ring" required disabled={courses.length === 0}>
               {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
             </select>
           </label>
@@ -407,11 +450,11 @@ export function LectureMaterialsPanel({ courses }: { courses: Course[] }) {
           </label>
           <label className="grid gap-1.5 text-sm font-medium">
             Lecture file
-            <input type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.mp4" onChange={(event) => { setError(null); setFile(event.target.files?.[0] ?? null); }} className="block w-full rounded-xl border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-primary-soft file:px-2 file:py-1 file:text-xs file:font-semibold file:text-primary" required />
+            <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.mp4" onChange={(event) => { setError(null); setFile(event.target.files?.[0] ?? null); }} className="block w-full rounded-xl border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-primary-soft file:px-2 file:py-1 file:text-xs file:font-semibold file:text-primary" required />
             <span className="text-xs font-normal text-muted-foreground">PDF, DOC, DOCX, PPT, PPTX or MP4 · max 10 MB</span>
           </label>
-          <button type="submit" disabled={isPublishing} className="tap-target flex items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60">
-            <FileUp className="h-4 w-4" /> {isPublishing ? "Publishing…" : "Publish lecture"}
+          <button type="submit" disabled={isPublishing || courses.length === 0} className="tap-target flex items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60">
+            <FileUp className="h-4 w-4" /> {isPublishing ? "Uploading…" : "Publish lecture"}
           </button>
           {error ? <p role="alert" className="text-center text-xs font-medium text-destructive">{error}</p> : null}
           {published ? <p role="status" className="text-center text-xs font-medium text-success">{published}</p> : null}
@@ -423,7 +466,7 @@ export function LectureMaterialsPanel({ courses }: { courses: Course[] }) {
           <h3 className="font-semibold">Published lectures</h3>
           <p className="text-xs text-muted-foreground">Visible only to the selected student group.</p>
         </div>
-        <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold">{visibleMaterials.length}/{materials.length}</span>
+          <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold">{visibleMaterials.length}/{materials.length}</span>
       </div>
       <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
         <label className="relative">
@@ -444,23 +487,26 @@ export function LectureMaterialsPanel({ courses }: { courses: Course[] }) {
           <option value="title">Title A–Z</option>
         </select>
       </div>
-      {visibleMaterials.length === 0 ? (
+      {isLoading ? <p className="py-6 text-center text-sm text-muted-foreground">Loading published lectures…</p> : null}
+      {!isLoading && visibleMaterials.length === 0 ? (
         <EmptyState message={materials.length === 0 ? "No lectures uploaded yet." : "No lectures match your filters."} />
-      ) : (
+      ) : null}
+      {!isLoading && visibleMaterials.length > 0 ? (
         <div className="space-y-3">
           {visibleMaterials.map((material) => (
             <Card key={material.id} className="flex items-start gap-3">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary"><FileText className="h-5 w-5" /></span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">{material.title}</p>
-                <p className="truncate text-xs text-muted-foreground">{material.fileName} · {material.uploadedAt}</p>
-                <p className="mt-1 text-xs font-medium text-primary">{material.groupName}</p>
+                <p className="truncate text-xs text-muted-foreground">{material.fileName} · {new Date(material.uploadedAt).toLocaleDateString()}</p>
+                <p className="mt-1 text-xs font-medium text-primary">{material.courseName} · {material.groupName}</p>
               </div>
-              <button aria-label={`Delete ${material.title}`} onClick={() => { if (window.confirm(`Delete “${material.title}” for group ${material.groupName}?`)) setMaterials((current) => current.filter((item) => item.id !== material.id)); }} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>
+              <a href={material.downloadUrl} download className="self-center rounded-lg px-2 py-2 text-xs font-semibold text-primary hover:bg-primary-soft">Download</a>
+              <button aria-label={`Delete ${material.title}`} disabled={deletingId === material.id} onClick={() => void removeMaterial(material)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-destructive hover:bg-destructive/10 disabled:opacity-50"><Trash2 className="h-4 w-4" /></button>
             </Card>
           ))}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

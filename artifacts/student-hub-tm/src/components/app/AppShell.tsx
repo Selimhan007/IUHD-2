@@ -37,7 +37,6 @@ import {
   events,
   materials,
   teachers,
-  notifications as demoNotifications,
   courseById,
 } from "@/lib/demo-data";
 
@@ -117,6 +116,7 @@ export function AppShell({ children, allow }: { children: ReactNode; allow?: Rol
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [searchOpen, setSearchOpen] = useState(false);
+  const [unread, setUnread] = useState(0);
 
   const allowed = !user || !allow || allow.includes(user.role);
 
@@ -126,7 +126,33 @@ export function AppShell({ children, allow }: { children: ReactNode; allow?: Rol
     else if (!allowed) navigate({ to: roleHome(user.role), replace: true });
   }, [ready, user, allowed, navigate]);
 
-  const unread = demoNotifications.filter((n) => !n.read).length;
+  useEffect(() => {
+    if (!ready || !user) {
+      setUnread(0);
+      return;
+    }
+
+    let active = true;
+    const refreshUnread = async () => {
+      try {
+        const response = await fetch("/api/content?type=notifications", { credentials: "include" });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { items?: Array<{ read: boolean }> };
+        if (active) setUnread(payload.items?.filter((item) => !item.read).length ?? 0);
+      } catch {
+        // Keep the last known badge count while the service is temporarily unavailable.
+      }
+    };
+
+    void refreshUnread();
+    const interval = window.setInterval(() => void refreshUnread(), 30_000);
+    window.addEventListener("focus", refreshUnread);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshUnread);
+    };
+  }, [ready, user?.id]);
 
   if (!ready || !user || !allowed) {
     return (

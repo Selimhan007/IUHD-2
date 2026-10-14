@@ -16,6 +16,7 @@ import {
   Settings2,
   Shield,
   SlidersHorizontal,
+  Trash2,
   Upload,
   UserRoundCog,
   Users,
@@ -23,18 +24,24 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/components/app/AppShell";
 import { ResourceManager, type ResourceItem } from "@/components/admin/resource-manager";
+import { LectureMaterialsPanel } from "@/components/teacher/panels";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
+  deleteContent,
+  getContent,
+  postContent,
+  type PublishedItem,
+} from "@/lib/content-client";
+import {
   announcements as demoAnnouncements,
+  courses,
   events as demoEvents,
   faculty,
   group,
   students as demoStudents,
   teachers as demoTeachers,
   university,
-  type Announcement,
-  type UniEvent,
 } from "@/lib/demo-data";
 
 export const Route = createFileRoute("/admin")({
@@ -76,8 +83,6 @@ function AdminConsole() {
   const { t } = useI18n();
   const [tab, setTab] = useState<TabId>("students");
   const [panel, setPanel] = useState<AdminPanel>("overview");
-  const [publishedAnnouncements, setPublishedAnnouncements] = useState(() => [...demoAnnouncements]);
-  const [publishedEvents, setPublishedEvents] = useState(() => [...demoEvents]);
 
   const [data, setData] = useState<Record<TabId, ResourceItem[]>>(() => ({
     students: demoStudents.map((s) => ({
@@ -212,12 +217,7 @@ function AdminConsole() {
       </> : null}
 
       {panel === "content" ? (
-        <ContentPublisher
-          announcements={publishedAnnouncements}
-          events={publishedEvents}
-          onAnnouncement={(item) => setPublishedAnnouncements((current) => [item, ...current])}
-          onEvent={(item) => setPublishedEvents((current) => [item, ...current])}
-        />
+        <ContentPublisher />
       ) : null}
 
       {panel === "control" ? <AdminOperations /> : null}
@@ -225,46 +225,104 @@ function AdminConsole() {
   );
 }
 
-function ContentPublisher({
-  announcements,
-  events,
-  onAnnouncement,
-  onEvent,
-}: {
-  announcements: Announcement[];
-  events: UniEvent[];
-  onAnnouncement: (item: Announcement) => void;
-  onEvent: (item: UniEvent) => void;
-}) {
-  const [kind, setKind] = useState<ContentKind>("announcement");
+function ContentPublisher() {
+  const [kind, setKind] = useState<ContentKind | "notification">("announcement");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [date, setDate] = useState("");
   const [place, setPlace] = useState("");
-  const [published, setPublished] = useState(false);
+  const [audience, setAudience] = useState<"all" | "students" | "teachers">("all");
+  const [category, setCategory] = useState("university");
+  const [important, setImportant] = useState(false);
+  const [items, setItems] = useState<PublishedItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [contentView, setContentView] = useState<"messages" | "materials">("messages");
 
-  const reset = () => {
-    setTitle("");
-    setBody("");
-    setDate("");
-    setPlace("");
-    setPublished(true);
+  useEffect(() => {
+    let active = true;
+    void getContent<{ items: PublishedItem[] }>("admin-content")
+      .then((response) => {
+        if (active) setItems(response.items);
+      })
+      .catch((requestError) => {
+        if (active) setError(requestError instanceof Error ? requestError.message : "Unable to load published content.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError("");
+    setSuccess("");
+    setSubmitting(true);
+    try {
+      const response = await postContent<{ item: PublishedItem; recipientCount: number }>({
+        action: "publish",
+        type: kind,
+        title,
+        body,
+        date,
+        place,
+        audience,
+        category,
+        important,
+      });
+      setItems((current) => [response.item, ...current.filter((item) => item.id !== response.item.id)]);
+      setTitle("");
+      setBody("");
+      setDate("");
+      setPlace("");
+      setImportant(false);
+      setSuccess(`Published. ${response.recipientCount} notification${response.recipientCount === 1 ? "" : "s"} sent.`);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to publish content.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!title.trim() || !body.trim()) return;
-    const id = `admin-${Date.now()}`;
-    if (kind === "announcement") {
-      onAnnouncement({ id, title: title.trim(), body: body.trim(), author: "Administration", date: date || new Date().toISOString().slice(0, 10), category: "university" });
-    } else {
-      onEvent({ id, title: title.trim(), description: body.trim(), date: date || new Date().toISOString().slice(0, 10), place: place.trim() || "Campus" });
+  const removeItem = async (item: PublishedItem) => {
+    setError("");
+    setSuccess("");
+    setDeletingId(item.id);
+    try {
+      await deleteContent<{ deleted: boolean }>(`id=${encodeURIComponent(item.id)}`);
+      setItems((current) => current.filter((entry) => entry.id !== item.id));
+      setSuccess("Published content deleted.");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to delete content.");
+    } finally {
+      setDeletingId(null);
     }
-    reset();
   };
 
   return (
     <section className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        {([["messages", "Announcements, notifications & events"], ["materials", "Lesson materials"]] as const).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setContentView(value)}
+            className={cn(
+              "rounded-xl px-4 py-2.5 text-sm font-semibold",
+              contentView === value ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {contentView === "materials" ? <LectureMaterialsPanel courses={courses} /> : (
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
         <form onSubmit={submit} className="rounded-3xl border border-border bg-card p-5 shadow-card">
           <div className="flex items-center gap-3">
@@ -272,33 +330,57 @@ function ContentPublisher({
               {kind === "announcement" ? <Bell className="h-5 w-5" /> : <CalendarPlus className="h-5 w-5" />}
             </span>
             <div>
-              <h2 className="font-bold">Publish content</h2>
-              <p className="text-xs text-muted-foreground">Share updates with students and teachers.</p>
+              <h2 className="font-bold">Send an update</h2>
+              <p className="text-xs text-muted-foreground">Published updates are saved and sent to the selected audience.</p>
             </div>
           </div>
           <div className="mt-5 grid grid-cols-2 gap-2">
-            {([['announcement', 'Announcement'], ['event', 'Event']] as const).map(([value, label]) => (
+            {([['announcement', 'Announcement'], ['notification', 'Notification'], ['event', 'Event']] as const).map(([value, label]) => (
               <button key={value} type="button" onClick={() => setKind(value)} className={cn("rounded-xl px-3 py-2.5 text-sm font-semibold", kind === value ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>{label}</button>
             ))}
           </div>
-          <label className="mt-4 block text-sm font-medium">Title<input required value={title} onChange={(e) => setTitle(e.target.value)} className="mt-1.5 w-full rounded-xl border border-input bg-background px-3 py-2.5 font-normal" /></label>
-          <label className="mt-3 block text-sm font-medium">{kind === "announcement" ? "Message" : "Description"}<textarea required value={body} onChange={(e) => setBody(e.target.value)} rows={4} className="mt-1.5 w-full resize-none rounded-xl border border-input bg-background px-3 py-2.5 font-normal" /></label>
+          <label className="mt-4 block text-sm font-medium">Title<input required minLength={2} maxLength={160} value={title} onChange={(e) => setTitle(e.target.value)} className="mt-1.5 w-full rounded-xl border border-input bg-background px-3 py-2.5 font-normal" /></label>
+          <label className="mt-3 block text-sm font-medium">{kind === "announcement" ? "Message" : kind === "event" ? "Description" : "Notification text"}<textarea required maxLength={5000} value={body} onChange={(e) => setBody(e.target.value)} rows={4} className="mt-1.5 w-full resize-none rounded-xl border border-input bg-background px-3 py-2.5 font-normal" /></label>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <label className="text-sm font-medium">Date<input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="mt-1.5 w-full rounded-xl border border-input bg-background px-3 py-2.5 font-normal" /></label>
-            {kind === "event" ? <label className="text-sm font-medium">Place<input value={place} onChange={(e) => setPlace(e.target.value)} className="mt-1.5 w-full rounded-xl border border-input bg-background px-3 py-2.5 font-normal" /></label> : null}
+            {kind === "event" ? <label className="text-sm font-medium">Date<input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className="mt-1.5 w-full rounded-xl border border-input bg-background px-3 py-2.5 font-normal" /></label> : null}
+            {kind === "event" ? <label className="text-sm font-medium">Place<input required maxLength={200} value={place} onChange={(e) => setPlace(e.target.value)} className="mt-1.5 w-full rounded-xl border border-input bg-background px-3 py-2.5 font-normal" /></label> : null}
+            {kind === "announcement" ? (
+              <label className="text-sm font-medium">Category
+                <select value={category} onChange={(e) => setCategory(e.target.value)} className="mt-1.5 w-full rounded-xl border border-input bg-background px-3 py-2.5 font-normal">
+                  <option value="university">University</option><option value="faculty">Faculty</option><option value="department">Department</option><option value="group">Group</option><option value="emergency">Emergency</option>
+                </select>
+              </label>
+            ) : null}
+            <label className="text-sm font-medium">Send to
+              <select value={audience} onChange={(e) => setAudience(e.target.value as "all" | "students" | "teachers")} className="mt-1.5 w-full rounded-xl border border-input bg-background px-3 py-2.5 font-normal">
+                <option value="all">Students and teachers</option><option value="students">Students only</option><option value="teachers">Teachers only</option>
+              </select>
+            </label>
           </div>
-          <button type="submit" className="mt-4 flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"><Megaphone className="h-4 w-4" /> Publish</button>
-          {published ? <p className="mt-3 text-xs font-medium text-success">Published successfully.</p> : null}
+          {kind === "announcement" ? <label className="mt-3 flex items-center gap-2 text-sm"><input type="checkbox" checked={important} onChange={(e) => setImportant(e.target.checked)} />Mark as important</label> : null}
+          <button type="submit" disabled={submitting} className="mt-4 flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-60"><Megaphone className="h-4 w-4" />{submitting ? "Sending…" : kind === "notification" ? "Send notification" : "Publish"}</button>
+          {error ? <p role="alert" className="mt-3 text-xs font-medium text-destructive">{error}</p> : null}
+          {success ? <p role="status" className="mt-3 text-xs font-medium text-success">{success}</p> : null}
         </form>
         <div className="rounded-3xl border border-border bg-card p-5 shadow-card">
           <h2 className="font-bold">Published content</h2>
           <div className="mt-4 space-y-2">
-            {[...announcements.slice(0, 4).map((item) => ({ ...item, kind: "Announcement" })), ...events.slice(0, 4).map((item) => ({ ...item, kind: "Event", body: item.description }))].map((item) => (
-              <article key={item.id} className="rounded-2xl bg-muted/50 p-3"><div className="flex items-center justify-between gap-3"><p className="font-semibold">{item.title}</p><span className="text-[11px] text-primary">{item.kind}</span></div><p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.body}</p></article>
+            {loading ? <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p> : null}
+            {!loading && items.length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">No content has been published yet.</p> : null}
+            {items.map((item) => (
+              <article key={item.id} className="rounded-2xl bg-muted/50 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0"><p className="truncate font-semibold">{item.title}</p><span className="text-[11px] capitalize text-primary">{item.type} · {item.audience}</span></div>
+                  <button type="button" disabled={deletingId === item.id} aria-label={`Delete ${item.title}`} onClick={() => void removeItem(item)} className="flex size-8 shrink-0 items-center justify-center rounded-lg text-destructive hover:bg-destructive/10 disabled:opacity-50"><Trash2 className="size-4" /></button>
+                </div>
+                <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.body}</p>
+                {item.type === "event" ? <p className="mt-1 text-[11px] text-muted-foreground">{item.date} · {item.place}</p> : null}
+              </article>
             ))}
           </div>
         </div>
       </div>
+      )}
     </section>
   );
 }

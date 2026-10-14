@@ -12,6 +12,7 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { announcements, assignments, courseById, lessons, teacherOfCourse } from "@/lib/demo-data";
+import { getContent, type AnnouncementItem } from "@/lib/content-client";
 import {
   CalendarDays,
   GraduationCap,
@@ -54,10 +55,25 @@ function HomePage() {
   const { t } = useI18n();
   const { user } = useAuth();
   const [now, setNow] = useState(() => new Date());
+  const [publishedAnnouncements, setPublishedAnnouncements] = useState<AnnouncementItem[]>([]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void getContent<{ items: AnnouncementItem[] }>("announcements")
+      .then((response) => {
+        if (active) setPublishedAnnouncements(response.items);
+      })
+      .catch(() => {
+        // Keep the static demo announcements visible if the network is unavailable.
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const weekday = ((now.getDay() + 6) % 7) + 1;
@@ -163,7 +179,7 @@ function HomePage() {
             label={t("home.viewAll")}
           />
           <div className="space-y-3">
-            {announcements
+            {[...publishedAnnouncements, ...announcements]
               .slice()
               .sort((a, b) => Number(!!b.important) - Number(!!a.important))
               .slice(0, 2)
