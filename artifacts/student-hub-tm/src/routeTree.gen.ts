@@ -27,6 +27,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TasksRouteImport } from './routes/tasks'
 import { Route as TeacherRouteImport } from './routes/teacher'
 import { Route as ApiAssistantRouteImport } from './routes/api/assistant'
+import { Route as ApiContentRouteImport } from './routes/api/content'
 import { Route as ApiProfileRouteImport } from './routes/api/profile'
 import { Route as CoursesIndexRouteImport } from './routes/courses.index'
 import { Route as CoursesCourseIdRouteImport } from './routes/courses.$courseId'
@@ -122,6 +123,11 @@ const ApiAssistantRoute = ApiAssistantRouteImport.update({
   path: '/api/assistant',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiContentRoute = ApiContentRouteImport.update({
+  id: '/api/content',
+  path: '/api/content',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiProfileRoute = ApiProfileRouteImport.update({
   id: '/api/profile',
   path: '/api/profile',
@@ -162,6 +168,7 @@ export interface FileRoutesByFullPath {
   '/tasks': typeof TasksRoute
   '/teacher': typeof TeacherRoute
   '/api/assistant': typeof ApiAssistantRoute
+  '/api/content': typeof ApiContentRoute
   '/api/profile': typeof ApiProfileRoute
   '/courses/$courseId': typeof CoursesCourseIdRoute
   '/courses/': typeof CoursesIndexRoute
@@ -185,6 +192,7 @@ export interface FileRoutesByTo {
   '/tasks': typeof TasksRoute
   '/teacher': typeof TeacherRoute
   '/api/assistant': typeof ApiAssistantRoute
+  '/api/content': typeof ApiContentRoute
   '/api/profile': typeof ApiProfileRoute
   '/courses/$courseId': typeof CoursesCourseIdRoute
   '/courses': typeof CoursesIndexRoute
@@ -210,6 +218,7 @@ export interface FileRoutesById {
   '/tasks': typeof TasksRoute
   '/teacher': typeof TeacherRoute
   '/api/assistant': typeof ApiAssistantRoute
+  '/api/content': typeof ApiContentRoute
   '/api/profile': typeof ApiProfileRoute
   '/courses/$courseId': typeof CoursesCourseIdRoute
   '/courses/': typeof CoursesIndexRoute
@@ -236,6 +245,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/teacher'
     | '/api/assistant'
+    | '/api/content'
     | '/api/profile'
     | '/courses/$courseId'
     | '/courses/'
@@ -259,6 +269,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/teacher'
     | '/api/assistant'
+    | '/api/content'
     | '/api/profile'
     | '/courses/$courseId'
     | '/courses'
@@ -283,6 +294,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/teacher'
     | '/api/assistant'
+    | '/api/content'
     | '/api/profile'
     | '/courses/$courseId'
     | '/courses/'
@@ -308,6 +320,7 @@ export interface RootRouteChildren {
   TasksRoute: typeof TasksRoute
   TeacherRoute: typeof TeacherRoute
   ApiAssistantRoute: typeof ApiAssistantRoute
+  ApiContentRoute: typeof ApiContentRoute
   ApiProfileRoute: typeof ApiProfileRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
@@ -440,6 +453,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAssistantRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/content': {
+      id: '/api/content'
+      path: '/api/content'
+      fullPath: '/api/content'
+      preLoaderRoute: typeof ApiContentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/profile': {
       id: '/api/profile'
       path: '/api/profile'
@@ -503,6 +523,7 @@ const rootRouteChildren: RootRouteChildren = {
   TasksRoute: TasksRoute,
   TeacherRoute: TeacherRoute,
   ApiAssistantRoute: ApiAssistantRoute,
+  ApiContentRoute: ApiContentRoute,
   ApiProfileRoute: ApiProfileRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }

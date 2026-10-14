@@ -1,5 +1,5 @@
 import { createFileRoute, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AppShell } from "@/components/app/AppShell";
 import { Card, EmptyState, PageHeader, ProgressBar } from "@/components/app/ui-kit";
 import { AnnouncementCard, AssignmentCard, MaterialCard } from "@/components/app/cards";
@@ -13,6 +13,8 @@ import {
   materials,
   teacherOfCourse,
 } from "@/lib/demo-data";
+import { useAuth } from "@/lib/auth";
+import { getContent, type AnnouncementItem, type SavedMaterial } from "@/lib/content-client";
 
 export const Route = createFileRoute("/courses/$courseId")({
   head: () => ({
@@ -31,8 +33,32 @@ const TABS = ["overview", "materials", "assignments", "grades", "attendance", "a
 function CourseDetail() {
   const { courseId } = useParams({ from: "/courses/$courseId" });
   const { t } = useI18n();
+  const { user } = useAuth();
   const [tab, setTab] = useState<(typeof TABS)[number]>("overview");
+  const [publishedMaterials, setPublishedMaterials] = useState<SavedMaterial[]>([]);
+  const [publishedAnnouncements, setPublishedAnnouncements] = useState<AnnouncementItem[]>([]);
   const course = courseById(courseId);
+
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    const materialType = user.role === "student" ? "materials" : "teacher-materials";
+    void Promise.all([
+      getContent<{ items: SavedMaterial[] }>(materialType),
+      getContent<{ items: AnnouncementItem[] }>("announcements"),
+    ])
+      .then(([materialsResponse, announcementsResponse]) => {
+        if (!active) return;
+        setPublishedMaterials(materialsResponse.items);
+        setPublishedAnnouncements(announcementsResponse.items);
+      })
+      .catch(() => {
+        // The demo content remains available if stored content cannot be loaded.
+      });
+    return () => {
+      active = false;
+    };
+  }, [user?.id, user?.role]);
 
   if (!course) {
     return (
@@ -46,6 +72,8 @@ function CourseDetail() {
   const att = attendance.find((a) => a.courseId === course.id);
   const courseTasks = assignments.filter((a) => a.courseId === course.id);
   const courseMaterials = materials.filter((m) => m.courseId === course.id);
+  const publishedCourseMaterials = publishedMaterials.filter((m) => m.courseId === course.id);
+  const courseAnnouncements = [...publishedAnnouncements, ...announcements].slice(0, 3);
 
   return (
     <AppShell>
@@ -91,10 +119,13 @@ function CourseDetail() {
       ) : null}
 
       {tab === "materials" ? (
-        courseMaterials.length ? (
+        courseMaterials.length || publishedCourseMaterials.length ? (
           <div className="space-y-3">
             {courseMaterials.map((m) => (
               <MaterialCard key={m.id} m={m} />
+            ))}
+            {publishedCourseMaterials.map((m) => (
+              <MaterialCard key={m.id} m={{ id: m.id, courseId: m.courseId, title: m.title, kind: m.kind, size: m.size, downloadUrl: m.downloadUrl }} />
             ))}
           </div>
         ) : (
@@ -149,7 +180,7 @@ function CourseDetail() {
 
       {tab === "announcements" ? (
         <div className="space-y-3">
-          {announcements.slice(0, 3).map((a) => (
+          {courseAnnouncements.map((a) => (
             <AnnouncementCard key={a.id} a={a} />
           ))}
         </div>

@@ -139,7 +139,7 @@ export interface UniEvent {
 }
 export interface Notification {
   id: string;
-  kind: "assignment" | "deadline" | "grade" | "schedule" | "exam" | "announcement" | "event" | "attendance";
+  kind: "assignment" | "deadline" | "grade" | "schedule" | "exam" | "announcement" | "event" | "attendance" | "material";
   text: string;
   time: string;
   read: boolean;
@@ -349,5 +349,5 @@ const DEMO_TEACHER_ACCOUNT_IDS: Record<string, string> = {
 export const teacherIdForAccount = (email: string, accountId: string) => {
   const normalizedEmail = email.trim().toLowerCase();
   const teacherByEmail = teachers.find((teacher) => teacher.email.toLowerCase() === normalizedEmail);
-  return teacherByEmail?.id ?? DEMO_TEACHER_ACCOUNT_IDS[normalizedEmail] ?? accountId;
+  return teacherByEmail?.id ?? DEMO_TEACHER_ACCOUNT_IDS[normalizedEmail] ?? teachers[0]?.id ?? accountId;
 };

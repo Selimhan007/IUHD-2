@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AppShell } from "@/components/app/AppShell";
 import { EmptyState, PageHeader } from "@/components/app/ui-kit";
 import { AnnouncementCard } from "@/components/app/cards";
 import { useI18n } from "@/lib/i18n";
 import { announcements, type AnnCategory } from "@/lib/demo-data";
+import { getContent, type AnnouncementItem } from "@/lib/content-client";
 import { Megaphone } from "lucide-react";
 
 export const Route = createFileRoute("/announcements")({
@@ -24,8 +25,24 @@ const CATEGORIES: (AnnCategory | "all")[] = ["all", "university", "faculty", "de
 function AnnouncementsPage() {
   const { t } = useI18n();
   const [cat, setCat] = useState<AnnCategory | "all">("all");
+  const [published, setPublished] = useState<AnnouncementItem[]>([]);
+  const [error, setError] = useState("");
 
-  const list = announcements
+  useEffect(() => {
+    let active = true;
+    void getContent<{ items: AnnouncementItem[] }>("announcements")
+      .then((response) => {
+        if (active) setPublished(response.items);
+      })
+      .catch((requestError) => {
+        if (active) setError(requestError instanceof Error ? requestError.message : "Unable to load announcements.");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const list = [...published, ...announcements]
     .filter((a) => cat === "all" || a.category === cat)
     .slice()
     .sort((a, b) => Number(!!b.important) - Number(!!a.important) || b.date.localeCompare(a.date));
@@ -48,6 +65,7 @@ function AnnouncementsPage() {
         ))}
       </div>
 
+      {error ? <p role="alert" className="mb-4 text-sm text-destructive">{error}</p> : null}
       {list.length === 0 ? (
         <EmptyState message={t("empty.announcements")} icon={<Megaphone className="h-6 w-6" />} />
       ) : (
