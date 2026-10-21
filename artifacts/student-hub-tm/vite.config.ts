@@ -10,7 +10,7 @@ import { loadEnv } from "vite";
 // Vite exposes .env values through import.meta.env, while the server-side auth
 // and database modules read process.env. Bridge the project variables before
 // TanStack Start creates the SSR server bundle.
-const mode = process.env.NODE_ENV === "production" ? "production" : "development";
+const mode = process.env["NODE_ENV"] === "production" ? "production" : "development";
 Object.assign(process.env, loadEnv(mode, process.cwd(), ""));
 
 export default defineConfig({
