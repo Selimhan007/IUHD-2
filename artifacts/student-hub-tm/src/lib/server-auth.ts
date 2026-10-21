@@ -1,7 +1,10 @@
 import { betterAuth } from "better-auth";
 import { Pool } from "pg";
 
-const pool = new Pool({ connectionString: process.env["DATABASE_URL"] });
+const pool = new Pool({
+  connectionString: process.env["DATABASE_URL"],
+  options: "-c search_path=neon_auth,public",
+});
 
 const localOrigins = [3000, 8080, 8081, 8082, 8083, 8084, 8085, 8086, 8087, 8088, 8089, 8090].map((port) => `http://localhost:${port}`);
 const replitDevOrigin = process.env["REPLIT_DEV_DOMAIN"]
