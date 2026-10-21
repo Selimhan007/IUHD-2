@@ -33,18 +33,42 @@ const Ctx = createContext<AuthCtx>({
 });
 
 async function getSession(): Promise<SessionUser | null> {
-  const response = await fetch("/api/auth/get-session", { credentials: "include" });
-  if (!response.ok) return null;
-  const payload = (await response.json()) as { user?: { id: string; name: string; email: string } } | null;
-  if (!payload?.user) return null;
-  const profileResponse = await fetch("/api/profile", { credentials: "include" });
-  if (!profileResponse.ok) return null;
-  const profile = (await profileResponse.json()) as Partial<SessionUser> | null;
-  return {
-    ...payload.user,
-    ...profile,
-    role: (profile?.role as Role | undefined) ?? "student",
-  };
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 5000);
+
+  try {
+    const response = await fetch("/api/auth/get-session", {
+      credentials: "include",
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+
+    const payload = (await response.json()) as { user?: { id: string; name: string; email: string } } | null;
+    if (!payload?.user) return null;
+
+    let profile: Partial<SessionUser> | null = null;
+    try {
+      const profileResponse = await fetch("/api/profile", {
+        credentials: "include",
+        signal: controller.signal,
+      });
+      if (profileResponse.ok) {
+        profile = (await profileResponse.json()) as Partial<SessionUser> | null;
+      }
+    } catch {
+      // A missing profile must not keep the whole application in its loading state.
+    }
+
+    return {
+      ...payload.user,
+      ...profile,
+      role: (profile?.role as Role | undefined) ?? "student",
+    };
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
